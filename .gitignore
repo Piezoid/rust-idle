@@ -1,1 +1,7 @@
 /target
+/arch/rust-idle
+/arch/src
+/arch/pkg
+/arch/*.pkg.tar*
+
+*.orig
