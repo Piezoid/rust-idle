@@ -1,0 +1,32 @@
+[package]
+name = "rust-idle"
+version = "0.1.0"
+description = "Rust spin-down utility, a reimplementation of hd-idle"
+authors = ["Maël kerbiriou <m431.kerbiriou@gmail.com>"]
+license = "MIT/Apache-2.0"
+readme = "README.md"
+keywords = ["hard-disk", "hd-idle", "cli", "daemon"]
+categories = ["command-line-utilities", "hardware-support"]
+edition = "2021"
+
+[profile.release]
+opt-level = "s"     # Optimize for size.
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = "abort"     # Abort on panic
+strip = true        # Automatically strip symbols from the binary.
+debug = false
+debug-assertions = false
+
+[dependencies]
+nc = "0.8"
+
+[dependencies.anyhow]
+version = "1.0"
+features = ["std"]
+default-features = false
+
+[dependencies.os_str_bytes]
+version = "6.0"
+features = ["raw_os_str"]
+default-features = false
