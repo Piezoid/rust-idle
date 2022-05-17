@@ -1,0 +1,34 @@
+[Unit]
+Description=Hard drive idling daemon
+
+[Service]
+EnvironmentFile=$CONFD/rust-idle
+ExecStart=$PREFIX/bin/rust-idle $RUST_IDLE_OPTS
+
+# Allow set
+DeviceAllow=block-sd
+CapabilityBoundingSet=CAP_SYS_ADMIN
+
+# Deny set
+NoNewPrivileges=true
+ProtectSystem=strict
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=none
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ProtectProc=noaccess
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectHostname=true
+ProtectClock=yes
+ProtectKernelLogs=yes
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+IPAddressDeny=any
+
+[Install]
+WantedBy=multi-user.target
