@@ -21,11 +21,6 @@ debug-assertions = false
 [dependencies]
 nc = "0.8"
 
-[dependencies.anyhow]
-version = "1.0"
-features = ["std"]
-default-features = false
-
 [dependencies.os_str_bytes]
 version = "6.0"
 features = ["raw_os_str"]

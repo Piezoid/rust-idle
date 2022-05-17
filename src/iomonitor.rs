@@ -6,7 +6,7 @@ use std::ffi::{OsStr, OsString};
 use std::ops::{Index, IndexMut};
 use std::os::unix::prelude::OsStrExt;
 
-use anyhow::{Context, Error, Result};
+use crate::errors::{Context, Result};
 
 use crate::utils::{parse_integer, BulkReader};
 
@@ -117,7 +117,7 @@ impl<T> IOMonitor<T> {
 
 fn parse_line(line: &[u8]) -> Result<Option<(&OsStr, usize)>> {
     let mut it = line.split(|c| *c == b' ').filter(|s| s.len() > 0);
-    let mut next_tok = move || it.next().ok_or_else(|| Error::msg("Expected token"));
+    let mut next_tok = move || it.next().ok_or_else(|| "Expected token");
 
     // major
     if !crate::sys::is_scsi(parse_integer(next_tok()?)?) {

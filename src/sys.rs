@@ -3,19 +3,23 @@
 // the LICENSE file.
 
 use std::ffi::{c_void, OsStr, OsString};
-use std::io::Error;
 use std::os::unix::ffi::OsStrExt;
 
-use anyhow::{anyhow, bail, Context, Result};
 pub use nc::c_str::CStr;
+
+use crate::errors::{Context, Result};
 
 /// Create a CStr by writing a '\0' at the end of a mutable byte slice.
 ///
 /// The last byte must be a whitespace character (' ', '\t', or '\0').
 pub fn make_inplace_cstr(str: &mut [u8]) -> Result<&CStr> {
-    let last = str.last_mut().ok_or_else(|| anyhow!("Empty string"))?;
+    let last = str.last_mut().ok_or_else(|| "Empty string")?;
     if last != &b'\0' && last != &b' ' && last != &b'\t' {
-        bail!("Expected null or whitespace at the end: '{:?}'", str);
+        return Err(format!(
+            "Expected null or whitespace at the end: '{}'",
+            OsStr::from_bytes(str).to_string_lossy()
+        )
+        .into());
     }
     *last = b'\0';
     Ok(unsafe { &*(str as *const [u8] as *const CStr) })
@@ -31,27 +35,34 @@ pub fn is_scsi(major: usize) -> bool {
 pub fn link_to_scsi_name(path: &OsStr) -> Result<OsString> {
     let mut stat_buf = nc::stat_t::default();
     unsafe { nc::stat(path, &mut stat_buf) }
-        .map_err(Error::from_raw_os_error)
         .with_context(|| format!("stat {}", path.to_string_lossy()))?;
     if !(stat_buf.st_mode & nc::S_IFMT == nc::S_IFBLK) {
-        bail!("Not a block device: '{}'", path.to_string_lossy());
+        return Err(format!("Not a block device: '{}'", path.to_string_lossy()).into());
     }
     let major = stat_buf.st_rdev >> 8;
     let minor = stat_buf.st_rdev & 0xff;
     if !is_scsi(major) {
-        bail!("Not a SCSI device: '{}'", path.to_string_lossy());
+        return Err(format!("Not a SCSI device: '{}'", path.to_string_lossy()).into());
     }
     if minor % 16 != 0 {
-        bail!(
+        return Err(format!(
             "'{}' is a partition, not a root device",
             path.to_string_lossy()
-        );
+        )
+        .into());
     }
     let dev_path = std::fs::canonicalize(path)
         .with_context(|| format!("getting cannonical path to '{}'", path.to_string_lossy()))?;
     dev_path
         .strip_prefix("/dev/")
-        .with_context(|| format!("getting device name from path '{}'", path.to_string_lossy()))
+        .map_err(|_| {
+            format!(
+                "path '{}' doesn't resolves to device under '/dev/' ('{}')",
+                path.to_string_lossy(),
+                dev_path.to_string_lossy()
+            )
+            .into()
+        })
         .map(|name| name.to_owned().into())
 }
 
@@ -64,7 +75,7 @@ where
     const PATH_PREFIX: &str = "/dev/";
     let path_len = PATH_PREFIX.len() + dev_name.len();
     if path_len >= PATH_LEN {
-        bail!("Device name too long: '{}'", dev_name.to_string_lossy());
+        return Err(format!("Device name too long: '{}'", dev_name.to_string_lossy()).into());
     }
     let mut path = [0u8; 32];
     path[..PATH_PREFIX.len()].copy_from_slice(b"/dev/");
@@ -75,7 +86,6 @@ where
     let flags = nc::O_RDONLY as usize;
     let fd = unsafe { nc::syscalls::syscall3(nc::SYS_OPEN, filename_ptr, flags, 0) }
         .map(|ret| ret as i32)
-        .map_err(Error::from_raw_os_error)
         .with_context(|| {
             format!(
                 "Could not open device '{}'",
@@ -85,14 +95,12 @@ where
 
     let res = f(fd);
 
-    unsafe { nc::close(fd) }
-        .map_err(Error::from_raw_os_error)
-        .with_context(|| {
-            format!(
-                "Failled to close '{}'",
-                String::from_utf8_lossy(&path[..path_len]),
-            )
-        })?;
+    unsafe { nc::close(fd) }.with_context(|| {
+        format!(
+            "Failled to close '{}'",
+            String::from_utf8_lossy(&path[..path_len]),
+        )
+    })?;
     res
 }
 
@@ -102,29 +110,24 @@ pub fn syncfs(path: &CStr) -> Result<()> {
     unsafe {
         let fd = nc::syscalls::syscall3(nc::SYS_OPEN, path_ptr, flags, 0)
             .map(|ret| ret as i32)
-            .map_err(Error::from_raw_os_error)
             .with_context(|| {
                 format!(
                     "Could not open mount point '{}'",
                     String::from_utf8_lossy(path.to_bytes())
                 )
             })?;
-        let res = nc::syncfs(fd)
-            .map_err(Error::from_raw_os_error)
-            .with_context(|| {
-                format!(
-                    "Could not sync mountpoint '{}'",
-                    String::from_utf8_lossy(path.to_bytes())
-                )
-            });
-        nc::close(fd)
-            .map_err(Error::from_raw_os_error)
-            .with_context(|| {
-                format!(
-                    "Could not close mountpoint '{}'",
-                    String::from_utf8_lossy(path.to_bytes())
-                )
-            })?;
+        let res = nc::syncfs(fd).with_context(|| {
+            format!(
+                "Could not sync mountpoint '{}'",
+                String::from_utf8_lossy(path.to_bytes())
+            )
+        });
+        nc::close(fd).with_context(|| {
+            format!(
+                "Could not close mountpoint '{}'",
+                String::from_utf8_lossy(path.to_bytes())
+            )
+        })?;
         res
     }
 }
@@ -134,7 +137,6 @@ const BLKFLSBUF: i32 = nc::IO('\u{12}' as char, 97);
 pub fn sync_blockdev(dev: &OsStr) -> Result<()> {
     with_dev_fd(dev, |fd| {
         unsafe { nc::ioctl(fd, BLKFLSBUF, 0) }
-            .map_err(Error::from_raw_os_error)
             .with_context(|| format!("Could not sync block device '{}'", dev.to_string_lossy()))
     })
 }
@@ -198,16 +200,16 @@ pub fn spindown_disk(dev: &OsStr) -> Result<()> {
             info: 0,
         };
         unsafe { nc::ioctl(fd, SG_IO, (&mut hdr as *mut sg_io_hdr) as usize) }
-            .map_err(Error::from_raw_os_error)
             .context("Could not send SCSI command")?;
         if hdr.masked_status != 0 {
             Err(if hdr.masked_status == CHECK_CONDITION {
-                anyhow!(
+                format!(
                     "SCSI command failed with CHECK_CONDITION, sense_buf: {:?}",
                     &sens_buf[..hdr.sb_len_wr as usize]
                 )
+                .into()
             } else {
-                anyhow!("SCSI command failed with status {:#04x}", hdr.masked_status)
+                format!("SCSI command failed with status {:#04x}", hdr.masked_status).into()
             })
         } else {
             Ok(())

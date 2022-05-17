@@ -2,21 +2,21 @@
 // reserved. Use of this source is governed by MIT License that can be found in
 // the LICENSE file.
 
+mod errors;
 mod iomonitor;
 mod mounts;
 mod sys;
 mod utils;
 
-use std::borrow::Cow;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::io::{stderr, Write};
 use std::process::exit;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{bail, Context, Result};
 use os_str_bytes::{RawOsStr, RawOsString};
 
+use errors::{Context, Result};
 use iomonitor::IOMonitor;
 use mounts::Mounts;
 
@@ -78,7 +78,7 @@ impl App {
         let mut prev_name = OsStr::new("");
         for (dev, config) in devices_config.into_iter() {
             if prev_name == dev {
-                bail!("Duplicated device: {}", dev.to_string_lossy())
+                return Err(format!("Duplicated device: {}", dev.to_string_lossy()).into());
             }
             if config.verbosity >= 2 {
                 println!(
@@ -135,14 +135,16 @@ impl App {
                 })?;
                 sys::sync_blockdev(dev)?;
             }
-            anyhow::Ok(do_sync)
+            errors::Ok(do_sync)
         };
 
         let now = SystemTime::now();
         let mut will_sleep = true;
         let mut check_activity = |dev: &OsStr, new_sectors: usize, record: &mut Device| {
             let config = &record.config;
-            let idle_time = now.duration_since(record.last_io)?;
+            let idle_time = now
+                .duration_since(record.last_io)
+                .map_err(|_| "non monotonic time")?;
             let sectors_inc = new_sectors.wrapping_sub(record.sectors);
             let busy = sectors_inc != 0;
             if busy {
@@ -161,7 +163,7 @@ impl App {
             }
 
             if record.config.idle_time == Duration::ZERO {
-                return Ok(());
+                return errors::Ok(());
             }
 
             record.state = match record.state {
@@ -211,7 +213,7 @@ impl App {
                     }
                 }
             };
-            anyhow::Ok(())
+            Ok(())
         };
 
         self.devices_monitor.check_activity(
@@ -249,10 +251,7 @@ impl App {
     }
 }
 
-fn parse_flags(
-    flags: &RawOsStr,
-    default: &DeviceConfig,
-) -> Result<DeviceConfig, Cow<'static, str>> {
+fn parse_flags(flags: &RawOsStr, default: &DeviceConfig) -> Result<DeviceConfig> {
     let mut config = default.clone();
     let mut idle_time = 0;
     let mut idle_time_sealed = false;
@@ -317,7 +316,6 @@ fn parse_args() -> Result<App> {
     for arg in args.map(RawOsString::new) {
         if let Some((disk, flags)) = arg.split_once(':') {
             let config = parse_flags(flags, &default_config)
-                .map_err(anyhow::Error::msg)
                 .with_context(|| format!("parsing flags for '{}'", arg.to_str_lossy()))?;
             if disk.is_empty() {
                 default_config = config;

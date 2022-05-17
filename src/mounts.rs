@@ -5,8 +5,7 @@
 use std::ffi::OsStr;
 use std::os::unix::prelude::OsStrExt;
 
-use anyhow::{Context, Error, Result};
-
+use crate::errors::{Context, Result};
 use crate::sys;
 use crate::utils::BulkReader;
 
@@ -41,7 +40,7 @@ impl Mounts {
 
 fn parse_line<'a>(line: &'a mut [u8], dev_name: &OsStr) -> Result<Option<&'a sys::CStr>> {
     let mut it = line.split_inclusive_mut(|c| *c == b' ' || *c == b'\0');
-    let mut next_tok = move || it.next().ok_or_else(|| Error::msg("Expected token"));
+    let mut next_tok = move || it.next().ok_or_else(|| "Expected token".into());
 
     let source = next_tok().context("Parsing mount source")?;
     if !source.starts_with(b"/dev/") {

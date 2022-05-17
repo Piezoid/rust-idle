@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-use anyhow::{anyhow, Context, Result};
+use crate::errors::{Context, Result};
 
 /// An utility to repeatedly read a file into a buffer, minimizing allocations.
 pub struct BulkReader {
@@ -70,10 +70,7 @@ pub fn parse_integer(txt: &[u8]) -> Result<usize> {
         if v <= 9 {
             res = res.wrapping_mul(10).wrapping_add(v as usize);
         } else {
-            return Err(anyhow!(
-                "Invalid integer: '{}'",
-                String::from_utf8_lossy(txt)
-            ));
+            return Err(format!("Invalid integer: '{}'", String::from_utf8_lossy(txt)).into());
         }
     }
     Ok(res)
