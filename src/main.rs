@@ -82,7 +82,7 @@ impl App {
             }
             if config.verbosity >= 2 {
                 println!(
-                    "Device {} configured as {:?}",
+                    "<6>Device {} configured as {:?}",
                     dev.to_string_lossy(),
                     config
                 );
@@ -96,7 +96,7 @@ impl App {
         let interval = (min_idle_time / 10).max(Duration::from_secs(1));
         if default_config.verbosity >= 2 {
             println!(
-                "Default device configuration: {:?}. Refresh period: {}s",
+                "<6>Default device configuration: {:?}. Refresh period: {}s",
                 default_config,
                 interval.as_secs()
             );
@@ -115,127 +115,99 @@ impl App {
     }
 
     fn tick(&mut self) -> Result<bool> {
-        self.mounts.update();
-        let default_config = &self.default_config;
-
-        let mut sync = |dev: &OsStr, config: &DeviceConfig, flag| {
-            let do_sync = config.sync_flags & flag != 0;
-            if do_sync {
-                if config.verbosity >= 2 {
-                    println!("Syncing {}", dev.to_string_lossy());
-                }
-                self.mounts.for_dev(dev, |mount_point| {
-                    if config.verbosity >= 3 {
-                        println!(
-                            "syncfs({})",
-                            String::from_utf8_lossy(mount_point.to_bytes())
-                        );
-                    }
-                    sys::syncfs(mount_point)
-                })?;
-                sys::sync_blockdev(dev)?;
-            }
-            errors::Ok(do_sync)
-        };
+        self.mounts.update(); // Clear the mount table, will lazy load when needed.
 
         let now = SystemTime::now();
         let mut will_sleep = true;
-        let mut check_activity = |dev: &OsStr, new_sectors: usize, record: &mut Device| {
-            let config = &record.config;
-            let idle_time = now
-                .duration_since(record.last_io)
-                .map_err(|_| "non monotonic time")?;
-            let sectors_inc = new_sectors.wrapping_sub(record.sectors);
-            let busy = sectors_inc != 0;
-            if busy {
-                if config.verbosity >= 3 && record.sectors != 0 {
-                    println!(
-                        "Activity detected on {}, sectors: {} => {} (+{}), idle time: {}s",
-                        dev.to_string_lossy(),
-                        record.sectors,
-                        new_sectors,
-                        sectors_inc,
-                        idle_time.as_secs()
-                    );
+
+        self.devices_monitor.check_activity(
+            |dev_name: &OsStr, new_sectors: usize, record: &mut Device| {
+                let config = &record.config;
+                let idle_time = now
+                    .duration_since(record.last_io)
+                    .expect("non monotonic time");
+                let sectors_inc = new_sectors.wrapping_sub(record.sectors);
+                let busy = sectors_inc != 0;
+                if busy {
+                    if config.verbosity >= 3 && record.sectors != 0 {
+                        println!(
+                            "<7>Activity detected on {}, sectors: {} => {} (+{}), idle time: {}s",
+                            dev_name.to_string_lossy(),
+                            record.sectors,
+                            new_sectors,
+                            sectors_inc,
+                            idle_time.as_secs()
+                        );
+                    }
+                    record.sectors = new_sectors;
+                    record.last_io = now;
                 }
-                record.sectors = new_sectors;
-                record.last_io = now;
-            }
 
-            if record.config.idle_time == Duration::ZERO {
-                return errors::Ok(());
-            }
+                if record.config.idle_time == Duration::ZERO {
+                    return;
+                }
 
-            record.state = match record.state {
-                DeviceState::Busy() => {
-                    if !busy && idle_time >= config.idle_time {
-                        if config.verbosity >= 1 {
-                            println!(
-                                "{} has gone idle. (idle_time: {}s >= {}s)",
-                                dev.to_string_lossy(),
-                                idle_time.as_secs(),
-                                record.config.idle_time.as_secs()
-                            );
+                record.state = match record.state {
+                    DeviceState::Busy() => {
+                        if !busy && idle_time >= config.idle_time {
+                            if config.verbosity >= 1 {
+                                println!(
+                                    "<5>{} has gone idle. (idle_time: {}s >= {}s)",
+                                    dev_name.to_string_lossy(),
+                                    idle_time.as_secs(),
+                                    record.config.idle_time.as_secs()
+                                );
+                            }
+                            let next_state = if config.sync_flags & SYNC_SPIN_DOWN != 0 {
+                                sync_block_device(&mut self.mounts, dev_name, config.verbosity);
+                                // Immediately refresh the statistics while ignoring activity on this
+                                // device from the sync.
+                                will_sleep = false;
+                                DeviceState::Synced()
+                            } else {
+                                DeviceState::Idle()
+                            };
+                            if config.verbosity >= 2 {
+                                println!("<6>Spinning down {}", dev_name.to_string_lossy());
+                            }
+                            if let Err(e) = sys::spindown_disk(dev_name) {
+                                eprintln!(
+                                    "<4>Failed to spindown {}: {}",
+                                    dev_name.to_string_lossy(),
+                                    e
+                                )
+                            }
+                            next_state
+                        } else {
+                            DeviceState::Busy()
                         }
-                        let synced = sync(dev, config, SYNC_SPIN_DOWN)
-                            .with_context(|| format!("syncing device {}", dev.to_string_lossy()))?;
-                        if config.verbosity >= 2 {
-                            println!("Spinning down {}", dev.to_string_lossy());
-                        }
-                        sys::spindown_disk(dev)
-                            .with_context(|| format!("spinning down {}", dev.to_string_lossy()))?;
-                        if synced {
-                            will_sleep = false;
-                            DeviceState::Synced()
+                    }
+                    DeviceState::Synced() => DeviceState::Idle(),
+                    DeviceState::Idle() => {
+                        if busy {
+                            record.state = DeviceState::Busy();
+                            if config.verbosity >= 1 {
+                                println!(
+                                    "<5>{} has spun up. (idle_time: {}s)",
+                                    dev_name.to_string_lossy(),
+                                    idle_time.as_secs()
+                                );
+                            }
+                            if config.sync_flags & SYNC_SPIN_UP != 0 {
+                                sync_block_device(&mut self.mounts, dev_name, config.verbosity);
+                            }
+                            DeviceState::Busy()
                         } else {
                             DeviceState::Idle()
                         }
-                    } else {
-                        DeviceState::Busy()
                     }
-                }
-                DeviceState::Synced() => DeviceState::Idle(),
-                DeviceState::Idle() => {
-                    if busy {
-                        record.state = DeviceState::Busy();
-                        if config.verbosity >= 1 {
-                            println!(
-                                "{} has spinned up. (idle_time: {}s)",
-                                dev.to_string_lossy(),
-                                idle_time.as_secs()
-                            );
-                        }
-                        sync(dev, config, SYNC_SPIN_UP)
-                            .with_context(|| format!("syncing device {}", dev.to_string_lossy()))?;
-                        DeviceState::Busy()
-                    } else {
-                        DeviceState::Idle()
-                    }
-                }
-            };
-            Ok(())
-        };
-
-        self.devices_monitor.check_activity(
-            |name: &OsStr, new_sectors: usize, device: &mut Device| match check_activity(
-                name,
-                new_sectors,
-                device,
-            ) {
-                Ok(()) => {}
-                Err(e) => write!(
-                    stderr(),
-                    "error while operating on {}: {:#}\n",
-                    name.to_string_lossy(),
-                    e
-                )
-                .unwrap(),
+                };
             },
             |name| {
-                if default_config.verbosity >= 1 {
-                    println!("New device detected: {}", name.to_string_lossy());
+                if self.default_config.verbosity >= 1 {
+                    println!("<5>New device detected: {}", name.to_string_lossy());
                 }
-                Device::new(default_config.clone())
+                Device::new(self.default_config.clone())
             },
         )?;
 
@@ -248,6 +220,31 @@ impl App {
                 std::thread::sleep(self.interval)
             }
         }
+    }
+}
+
+/// Syncs all filesystems associated with the given device, then sync the device buffers.
+///
+/// mounts: utility object to read and cache the mount points.
+fn sync_block_device(mounts: &mut Mounts, dev: &OsStr, verbosity: u8) {
+    if verbosity >= 2 {
+        println!("<6>Syncing {}", dev.to_string_lossy());
+    }
+
+    if let Err(e) = mounts
+        .for_dev(dev, |mount_point| {
+            if verbosity >= 3 {
+                println!(
+                    "<7>syncfs({})",
+                    String::from_utf8_lossy(mount_point.to_bytes())
+                );
+            }
+            sys::syncfs(mount_point)
+        })
+        //FIXME: is this redundant?
+        .and_then(|_| sys::sync_blockdev(dev))
+    {
+        eprintln!("<4>Failed to sync {}: {}\n", dev.to_string_lossy(), e)
     }
 }
 
@@ -372,11 +369,13 @@ verbosity=0 and sync on spin-up events.
 }
 
 fn main() {
-    match parse_args().and_then(|mut app| app.run().context("main loop")) {
-        Ok(()) => (),
-        Err(e) => {
-            write!(stderr(), "error: {:#}\n", e).unwrap();
-            exit(1);
-        }
-    }
+    exit(
+        match parse_args().and_then(|mut app| app.run().context("main loop")) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("<3>error: {:#}\n", e);
+                1
+            }
+        },
+    )
 }

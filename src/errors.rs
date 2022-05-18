@@ -16,11 +16,6 @@ pub struct Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
-#[allow(non_snake_case)]
-pub fn Ok<T>(v: T) -> Result<T> {
-    Result::Ok(v)
-}
-
 impl Error {
     fn push<T>(mut self, msg: T) -> Self
     where
