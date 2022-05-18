@@ -9,20 +9,26 @@ pub use nc::c_str::CStr;
 
 use crate::errors::{Context, Result};
 
-/// Create a CStr by writing a '\0' at the end of a mutable byte slice.
+/// Create a CStr by writing a '\0' in place at the end of a mutable byte slice.
 ///
 /// The last byte must be a whitespace character (' ', '\t', or '\0').
 pub fn make_inplace_cstr(str: &mut [u8]) -> Result<&CStr> {
     let last = str.last_mut().ok_or_else(|| "Empty string")?;
-    if last != &b'\0' && last != &b' ' && last != &b'\t' {
-        return Err(format!(
-            "Expected null or whitespace at the end: '{}'",
-            OsStr::from_bytes(str).to_string_lossy()
-        )
-        .into());
+    match last {
+        b' ' | b'\t' | b'\0' => {
+            *last = b'\0';
+            // Borrow-wise, it should be as safe as `return Ok(str)`:
+            // No further mutation is possible while the returned &CStr is held.
+            Ok(unsafe { &*(str as *const [u8] as *const CStr) })
+        }
+        _ => {
+            return Err(format!(
+                "Expected null or whitespace at the end of '{}'",
+                OsStr::from_bytes(str).to_string_lossy()
+            )
+            .into())
+        }
     }
-    *last = b'\0';
-    Ok(unsafe { &*(str as *const [u8] as *const CStr) })
 }
 
 pub fn is_scsi(major: usize) -> bool {
@@ -32,11 +38,13 @@ pub fn is_scsi(major: usize) -> bool {
     }
 }
 
+/// Returns the device name (as found under `/dev/`) from a symlink, while
+/// ensuring that the device is indeed a SCSI device.
 pub fn link_to_scsi_name(path: &OsStr) -> Result<OsString> {
     let mut stat_buf = nc::stat_t::default();
     unsafe { nc::stat(path, &mut stat_buf) }
         .with_context(|| format!("stat {}", path.to_string_lossy()))?;
-    if !(stat_buf.st_mode & nc::S_IFMT == nc::S_IFBLK) {
+    if !((stat_buf.st_mode as u32) & nc::S_IFMT == nc::S_IFBLK) {
         return Err(format!("Not a block device: '{}'", path.to_string_lossy()).into());
     }
     let major = stat_buf.st_rdev >> 8;
@@ -71,14 +79,15 @@ fn with_dev_fd<F, R>(dev_name: &OsStr, f: F) -> Result<R>
 where
     F: Fn(i32) -> Result<R>,
 {
-    const PATH_LEN: usize = 16;
-    const PATH_PREFIX: &str = "/dev/";
+    const MAX_PATH_LEN: usize = 16;
+    const PATH_PREFIX: &[u8] = b"/dev/";
     let path_len = PATH_PREFIX.len() + dev_name.len();
-    if path_len >= PATH_LEN {
+    // == => no room for '\0'
+    if path_len >= MAX_PATH_LEN {
         return Err(format!("Device name too long: '{}'", dev_name.to_string_lossy()).into());
     }
-    let mut path = [0u8; 32];
-    path[..PATH_PREFIX.len()].copy_from_slice(b"/dev/");
+    let mut path = [0u8; MAX_PATH_LEN];
+    path[..PATH_PREFIX.len()].copy_from_slice(PATH_PREFIX);
     path[PATH_PREFIX.len()..path_len].copy_from_slice(dev_name.as_bytes());
     path[path_len] = b'\0';
 
@@ -97,7 +106,7 @@ where
 
     unsafe { nc::close(fd) }.with_context(|| {
         format!(
-            "Failled to close '{}'",
+            "Failed to close '{}'",
             String::from_utf8_lossy(&path[..path_len]),
         )
     })?;
@@ -118,13 +127,13 @@ pub fn syncfs(path: &CStr) -> Result<()> {
             })?;
         let res = nc::syncfs(fd).with_context(|| {
             format!(
-                "Could not sync mountpoint '{}'",
+                "Could not sync mount point '{}'",
                 String::from_utf8_lossy(path.to_bytes())
             )
         });
         nc::close(fd).with_context(|| {
             format!(
-                "Could not close mountpoint '{}'",
+                "Could not close mount point '{}'",
                 String::from_utf8_lossy(path.to_bytes())
             )
         })?;
@@ -141,7 +150,11 @@ pub fn sync_blockdev(dev: &OsStr) -> Result<()> {
     })
 }
 
+/// Issue SCSI command to spin down a disk.
+//TODO: implement for ATA/USB devices.
 pub fn spindown_disk(dev: &OsStr) -> Result<()> {
+    /// Pulled from `/usr/include/scsi/sg.h`, comments are GNU 2.1 licensed,
+    /// Copyright (C) 1997-2022 Free Software Foundation, Inc.
     #[repr(C)]
     struct sg_io_hdr {
         i32erface_id: i32,      /* [i] 'S' for SCSI generic (required) */
