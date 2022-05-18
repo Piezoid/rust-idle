@@ -28,7 +28,12 @@ impl Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for ctx in self.chain.iter().skip(self.source.is_none() as usize).rev() {
+        for ctx in self
+            .chain
+            .iter()
+            .skip(usize::from(self.source.is_none()))
+            .rev()
+        {
             f.write_str(ctx)?;
             f.write_str(": ")?;
         }
@@ -57,7 +62,7 @@ impl std::error::Error for Error {
 impl From<CowStr> for Error {
     fn from(msg: CowStr) -> Self {
         Self {
-            chain: vec![msg.into()],
+            chain: vec![msg],
             source: None,
         }
     }
@@ -65,13 +70,13 @@ impl From<CowStr> for Error {
 
 impl From<&'static str> for Error {
     fn from(msg: &'static str) -> Self {
-        Error::from(CowStr::from(msg))
+        Self::from(CowStr::from(msg))
     }
 }
 
 impl From<String> for Error {
     fn from(msg: String) -> Self {
-        Error::from(CowStr::from(msg))
+        Self::from(CowStr::from(msg))
     }
 }
 
@@ -86,7 +91,7 @@ impl From<io::Error> for Error {
 
 impl From<i32> for Error {
     fn from(errno: i32) -> Self {
-        Error::from(io::Error::from_raw_os_error(errno))
+        Self::from(io::Error::from_raw_os_error(errno))
     }
 }
 
@@ -130,11 +135,11 @@ mod tests {
 
     #[test]
     fn it_works() {
-        assert_result_display(Err((0 as i32).into()), "Success (os error 0)");
+        assert_result_display(Err(0_i32.into()), "Success (os error 0)");
         assert_result_display(Err("a".into()), "a");
         assert_result_display(Err("c").context("b").with_context(|| "a"), "a: b: c");
         assert_result_display(
-            Err(0 as i32).context("b").with_context(|| "a"),
+            Err(0_i32).context("b").with_context(|| "a"),
             "a: b: Success (os error 0)",
         );
     }

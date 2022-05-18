@@ -9,11 +9,11 @@ pub use nc::c_str::CStr;
 
 use crate::errors::{Context, Result};
 
-/// Create a CStr by writing a '\0' in place at the end of a mutable byte slice.
+/// Create a `CStr` by writing a '\0' in place at the end of a mutable byte slice.
 ///
 /// The last byte must be a whitespace character (' ', '\t', or '\0').
 pub fn make_inplace_cstr(str: &mut [u8]) -> Result<&CStr> {
-    let last = str.last_mut().ok_or_else(|| "Empty string")?;
+    let last = str.last_mut().ok_or("Empty string")?;
     match last {
         b' ' | b'\t' | b'\0' => {
             *last = b'\0';
@@ -31,11 +31,8 @@ pub fn make_inplace_cstr(str: &mut [u8]) -> Result<&CStr> {
     }
 }
 
-pub fn is_scsi(major: usize) -> bool {
-    match major {
-        8 | 65..=71 => true,
-        _ => return false,
-    }
+pub const fn is_scsi(major: usize) -> bool {
+    matches!(major, 8 | 65..=71)
 }
 
 /// Returns the device name (as found under `/dev/`) from a symlink, while
@@ -44,7 +41,7 @@ pub fn link_to_scsi_name(path: &OsStr) -> Result<OsString> {
     let mut stat_buf = nc::stat_t::default();
     unsafe { nc::stat(path, &mut stat_buf) }
         .with_context(|| format!("stat {}", path.to_string_lossy()))?;
-    if !((stat_buf.st_mode as u32) & nc::S_IFMT == nc::S_IFBLK) {
+    if (stat_buf.st_mode as u32) & nc::S_IFMT != nc::S_IFBLK {
         return Err(format!("Not a block device: '{}'", path.to_string_lossy()).into());
     }
     let major = stat_buf.st_rdev >> 8;
@@ -141,7 +138,7 @@ pub fn syncfs(path: &CStr) -> Result<()> {
     }
 }
 
-const BLKFLSBUF: i32 = nc::IO('\u{12}' as char, 97);
+const BLKFLSBUF: i32 = nc::IO('\u{12}', 97);
 
 pub fn sync_blockdev(dev: &OsStr) -> Result<()> {
     with_dev_fd(dev, |fd| {
@@ -181,7 +178,7 @@ pub fn spindown_disk(dev: &OsStr) -> Result<()> {
         info: u32,           /* [o] auxiliary information */
     }
 
-    const SCSI_STOP_CMD: &'static [u8] = b"\x1b\x00\x00\x00\x00\x00";
+    const SCSI_STOP_CMD: &[u8] = b"\x1b\x00\x00\x00\x00\x00";
     const SG_DXFER_NONE: i32 = -1;
     const SG_IO: i32 = 0x2285;
     const CHECK_CONDITION: u8 = 0x01;
@@ -212,9 +209,11 @@ pub fn spindown_disk(dev: &OsStr) -> Result<()> {
             duration: 0,
             info: 0,
         };
-        unsafe { nc::ioctl(fd, SG_IO, (&mut hdr as *mut sg_io_hdr) as usize) }
+        unsafe { nc::ioctl(fd, SG_IO, std::ptr::addr_of_mut!(hdr) as usize) }
             .context("Could not send SCSI command")?;
-        if hdr.masked_status != 0 {
+        if hdr.masked_status == 0 {
+            Ok(())
+        } else {
             Err(if hdr.masked_status == CHECK_CONDITION {
                 format!(
                     "SCSI command failed with CHECK_CONDITION, sense_buf: {:?}",
@@ -224,8 +223,6 @@ pub fn spindown_disk(dev: &OsStr) -> Result<()> {
             } else {
                 format!("SCSI command failed with status {:#04x}", hdr.masked_status).into()
             })
-        } else {
-            Ok(())
         }
     })
 }

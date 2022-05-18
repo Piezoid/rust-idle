@@ -15,7 +15,7 @@ pub struct Mounts(BulkReader);
 
 impl Mounts {
     pub fn new() -> Result<Self> {
-        Ok(Mounts(BulkReader::open(MOUNTS_PATH)?))
+        Ok(Self(BulkReader::open(MOUNTS_PATH)?))
     }
 
     pub fn update(&mut self) {
@@ -31,7 +31,7 @@ impl Mounts {
         }
         for line in self.0.parse_lines_mut() {
             if let Some(mount_point) = parse_line(line, dev_name)? {
-                f(&mount_point)?;
+                f(mount_point)?;
             }
         }
         Ok(())

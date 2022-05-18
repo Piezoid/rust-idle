@@ -16,9 +16,9 @@ pub struct BulkReader {
 
 impl BulkReader {
     pub fn open_with_capacity<P: AsRef<Path>>(path: P, capacity: usize) -> Result<Self> {
-        Ok(BulkReader {
+        Ok(Self {
             file: File::open(path.as_ref())
-                .with_context(|| format!("Openning '{}' for reading", path.as_ref().display()))?,
+                .with_context(|| format!("Opening '{}' for reading", path.as_ref().display()))?,
             buf: Vec::with_capacity(capacity),
         })
     }
@@ -50,16 +50,18 @@ impl BulkReader {
         Ok(self
             .read()?
             .split_mut(|c| *c == b'\n')
-            .filter(|l| l.len() > 0))
+            .filter(|l| !l.is_empty()))
     }
 
     #[allow(unused)]
     pub fn parse_lines(&self) -> impl Iterator<Item = &[u8]> {
-        self.get().split(|c| *c == b'\n').filter(|l| l.len() > 0)
+        self.get().split(|c| *c == b'\n').filter(|l| !l.is_empty())
     }
 
     pub fn parse_lines_mut(&mut self) -> impl Iterator<Item = &mut [u8]> {
-        self.buf.split_mut(|c| *c == b'\n').filter(|l| l.len() > 0)
+        self.buf
+            .split_mut(|c| *c == b'\n')
+            .filter(|l| !l.is_empty())
     }
 }
 

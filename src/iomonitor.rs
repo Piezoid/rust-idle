@@ -31,44 +31,23 @@ impl<T> IndexMut<usize> for IOMonitor<T> {
     }
 }
 
-fn get_entry_idx<T>(vec: &Vec<(OsString, usize, T)>, name: &OsStr, hint: usize) -> Option<usize> {
-    for i in hint..vec.len() {
-        if vec[i].0 == name {
-            return Some(i);
-        }
-    }
-    for i in 0..hint {
-        if vec[i].0 == name {
-            return Some(i);
-        }
-    }
-    None
+fn get_entry_idx<T>(slice: &[(OsString, usize, T)], name: &OsStr, hint: usize) -> Option<usize> {
+    let pred = |&i: &usize| slice[i].0 == name;
+    (hint..slice.len())
+        .find(pred)
+        .or_else(|| (0..hint).find(pred))
 }
 
 impl<T> IOMonitor<T> {
     pub fn new() -> Result<Self> {
-        Ok(IOMonitor {
+        Ok(Self {
             file: BulkReader::open(DISKSTATS_PATH)?,
             state: Vec::with_capacity(16),
         })
     }
 
-    pub fn get_entry_idx(&self, dev: &OsStr, hint: usize) -> Option<usize> {
-        for i in hint..self.state.len() {
-            if self.state[i].0 == dev {
-                return Some(i);
-            }
-        }
-        for i in 0..hint {
-            if self.state[i].0 == dev {
-                return Some(i);
-            }
-        }
-        None
-    }
-
     pub fn push(&mut self, dev: OsString, val: T) -> (&OsString, &mut T) {
-        let idx = self.get_entry_idx(&dev, 0);
+        let idx = get_entry_idx(&self.state, &dev, 0);
         let slot = if let Some(idx) = idx {
             let slot = &mut self.state[idx];
             slot.2 = val;
@@ -82,10 +61,10 @@ impl<T> IOMonitor<T> {
 
     pub fn check_activity<'s, U, D>(&'s mut self, mut update_cb: U, create: D) -> Result<()>
     where
-        U: FnMut(&'s OsStr, usize, &'s mut T) -> (),
+        U: FnMut(&'s OsStr, usize, &'s mut T),
         D: Fn(&'s OsStr) -> T,
     {
-        for (_, value, _) in self.state.iter_mut() {
+        for (_, value, _) in &mut self.state {
             *value = 0;
         }
 
@@ -95,7 +74,7 @@ impl<T> IOMonitor<T> {
             if let Some((name, sectors)) = parse_line(line)
                 .with_context(|| format!("Parsing line '{}'", String::from_utf8_lossy(line)))?
             {
-                if let Some(new_entry_idx) = get_entry_idx(&self.state, &name, entry_idx) {
+                if let Some(new_entry_idx) = get_entry_idx(&self.state, name, entry_idx) {
                     entry_idx = new_entry_idx;
                     let entry_sectors = &mut self.state[entry_idx].1;
                     *entry_sectors = entry_sectors.wrapping_add(sectors);
@@ -107,7 +86,7 @@ impl<T> IOMonitor<T> {
             }
         }
 
-        for (name, sectors, value) in self.state.iter_mut() {
+        for (name, sectors, value) in &mut self.state {
             update_cb(name, *sectors, value);
         }
 
@@ -116,8 +95,8 @@ impl<T> IOMonitor<T> {
 }
 
 fn parse_line(line: &[u8]) -> Result<Option<(&OsStr, usize)>> {
-    let mut it = line.split(|c| *c == b' ').filter(|s| s.len() > 0);
-    let mut next_tok = move || it.next().ok_or_else(|| "Expected token");
+    let mut it = line.split(|c| *c == b' ').filter(|s| !s.is_empty());
+    let mut next_tok = move || it.next().ok_or("Expected token");
 
     // major
     if !crate::sys::is_scsi(parse_integer(next_tok()?)?) {

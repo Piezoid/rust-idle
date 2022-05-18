@@ -44,8 +44,8 @@ struct Device {
 }
 
 impl Device {
-    fn new(config: DeviceConfig) -> Self {
-        Device {
+    const fn new(config: DeviceConfig) -> Self {
+        Self {
             config,
             state: DeviceState::Busy(),
             sectors: 0,
@@ -76,7 +76,7 @@ impl App {
 
         // Inserts configured devices in the IOMonitor while checking for duplicates
         let mut prev_name = OsStr::new("");
-        for (dev, config) in devices_config.into_iter() {
+        for (dev, config) in devices_config {
             if prev_name == dev {
                 return Err(format!("Duplicated device: {}", dev.to_string_lossy()).into());
             }
@@ -88,8 +88,8 @@ impl App {
                 );
             }
             if config.idle_time > Duration::ZERO {
-                min_idle_time = min_idle_time.min(config.idle_time)
-            };
+                min_idle_time = min_idle_time.min(config.idle_time);
+            }
             prev_name = devices_monitor.push(dev, Device::new(config)).0;
         }
 
@@ -158,24 +158,24 @@ impl App {
                                     record.config.idle_time.as_secs()
                                 );
                             }
-                            let next_state = if config.sync_flags & SYNC_SPIN_DOWN != 0 {
+                            let next_state = if config.sync_flags & SYNC_SPIN_DOWN == 0 {
+                                DeviceState::Idle()
+                            } else {
                                 sync_block_device(&mut self.mounts, dev_name, config.verbosity);
                                 // Immediately refresh the statistics while ignoring activity on this
                                 // device from the sync.
                                 will_sleep = false;
                                 DeviceState::Synced()
-                            } else {
-                                DeviceState::Idle()
                             };
                             if config.verbosity >= 2 {
                                 println!("<6>Spinning down {}", dev_name.to_string_lossy());
                             }
                             if let Err(e) = sys::spindown_disk(dev_name) {
                                 eprintln!(
-                                    "<4>Failed to spindown {}: {}",
+                                    "<4>Failed to spin down {}: {}",
                                     dev_name.to_string_lossy(),
                                     e
-                                )
+                                );
                             }
                             next_state
                         } else {
@@ -217,7 +217,7 @@ impl App {
     fn run(&mut self) -> Result<()> {
         loop {
             if self.tick()? {
-                std::thread::sleep(self.interval)
+                std::thread::sleep(self.interval);
             }
         }
     }
@@ -244,7 +244,7 @@ fn sync_block_device(mounts: &mut Mounts, dev: &OsStr, verbosity: u8) {
         //FIXME: is this redundant?
         .and_then(|_| sys::sync_blockdev(dev))
     {
-        eprintln!("<4>Failed to sync {}: {}\n", dev.to_string_lossy(), e)
+        eprintln!("<4>Failed to sync {}: {}\n", dev.to_string_lossy(), e);
     }
 }
 
@@ -258,7 +258,7 @@ fn parse_flags(flags: &RawOsStr, default: &DeviceConfig) -> Result<DeviceConfig>
         if prev_flag != b'-' && c != prev_flag {
             prefix = b'+'; // Reset modifier to the default (+), but not for '-vv' (equivalent to '-v-v')
         }
-        let digit = c.wrapping_sub(b'0') as u64;
+        let digit = u64::from(c.wrapping_sub(b'0'));
         if digit < 10 {
             if idle_time_sealed {
                 return Err("idle time already set".into());
