@@ -3,7 +3,6 @@
 // the LICENSE file.
 
 use std::ffi::{OsStr, OsString};
-use std::ops::{Index, IndexMut};
 use std::os::unix::prelude::OsStrExt;
 
 use crate::errors::{Context, Result};
@@ -15,20 +14,6 @@ const DISKSTATS_PATH: &str = "/proc/diskstats";
 pub struct IOMonitor<T> {
     file: BulkReader,
     state: Vec<(OsString, usize, T)>,
-}
-
-impl<T> Index<usize> for IOMonitor<T> {
-    type Output = T;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.state[index].2
-    }
-}
-
-impl<T> IndexMut<usize> for IOMonitor<T> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.state[index].2
-    }
 }
 
 fn get_entry_idx<T>(slice: &[(OsString, usize, T)], name: &OsStr, hint: usize) -> Option<usize> {
