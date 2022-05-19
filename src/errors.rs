@@ -16,17 +16,8 @@ pub struct Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
-impl Error {
-    fn push<T>(mut self, msg: T) -> Self
-    where
-        CowStr: From<T>,
-    {
-        self.chain.push(msg.into());
-        self
-    }
-}
-
 impl fmt::Display for Error {
+    #[cold]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for ctx in self
             .chain
@@ -60,6 +51,7 @@ impl std::error::Error for Error {
 }
 
 impl From<CowStr> for Error {
+    #[cold]
     fn from(msg: CowStr) -> Self {
         Self {
             chain: vec![msg],
@@ -70,17 +62,18 @@ impl From<CowStr> for Error {
 
 impl From<&'static str> for Error {
     fn from(msg: &'static str) -> Self {
-        Self::from(CowStr::from(msg))
+        Self::from(CowStr::Borrowed(msg))
     }
 }
 
 impl From<String> for Error {
     fn from(msg: String) -> Self {
-        Self::from(CowStr::from(msg))
+        Self::from(CowStr::Owned(msg))
     }
 }
 
 impl From<io::Error> for Error {
+    #[cold]
     fn from(source: io::Error) -> Self {
         Self {
             chain: vec![],
@@ -113,7 +106,7 @@ where
     where
         CowStr: From<M>,
     {
-        self.map_err(|e| Error::from(e).push(msg))
+        self.map_err(|e| add_context(e, msg))
     }
 
     fn with_context<M, F>(self, f: F) -> Result<T>
@@ -121,8 +114,19 @@ where
         F: FnOnce() -> M,
         CowStr: From<M>,
     {
-        self.map_err(|e| Error::from(e).push(f()))
+        self.map_err(|e| add_context(e, f()))
     }
+}
+
+#[cold]
+fn add_context<E, M>(error: E, msg: M) -> Error
+where
+    Error: From<E>,
+    CowStr: From<M>,
+{
+    let mut this = Error::from(error);
+    this.chain.push(msg.into());
+    this
 }
 
 #[cfg(test)]

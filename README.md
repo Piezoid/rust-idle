@@ -38,7 +38,7 @@ decline all responsibility for any damage resulting from its use.
 * Systemd unit file included, log-level formatting for journald,
 * Tiny runtime footprint: no allocations during normal operation, unless logging
   is enabled or new drives are hot-plugged; Small binary when built with
-  `build-std` (80kB on `x86_64`),
+  `build-std` (71kB on `x86_64`, while the go implementation is 1.6M stripped),
 * Like [the go implementation](https://github.com/adelolmo/hd-idle), `rust-idle`
   doesn't monitors activity on root device but instead monitors partitions. This
   prevents false-positives when monitoring daemons like `smartd` or `udiskd`

@@ -10,6 +10,7 @@ mod utils;
 
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::fmt;
 use std::io::{stderr, Write};
 use std::process::exit;
 use std::time::{Duration, SystemTime};
@@ -26,7 +27,7 @@ enum DeviceState {
     Idle(),
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default)]
 struct DeviceConfig {
     idle_time: Duration,
     sync_flags: u8,
@@ -35,6 +36,26 @@ struct DeviceConfig {
 
 const SYNC_SPIN_DOWN: u8 = 1;
 const SYNC_SPIN_UP: u8 = 2;
+
+impl fmt::Display for DeviceConfig {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        const SYNC_BOTH: u8 = SYNC_SPIN_DOWN | SYNC_SPIN_UP;
+        let sync_flags = match self.sync_flags {
+            0 => "NONE",
+            SYNC_SPIN_DOWN => "SPIN_DOWN",
+            SYNC_SPIN_UP => "SPIN_UP",
+            SYNC_BOTH => "SPIN_DOWN | SPIN_UP",
+            _ => "UNKNOWN",
+        };
+        write!(
+            f,
+            "{{ idle_time: {}s, sync_flags: {}, verbosity: {} }}",
+            self.idle_time.as_secs(),
+            sync_flags,
+            self.verbosity
+        )
+    }
+}
 
 struct Device {
     sectors: usize,
@@ -82,7 +103,7 @@ impl App {
             }
             if config.verbosity >= 2 {
                 println!(
-                    "<6>Device {} configured as {:?}",
+                    "<6>Device {} configured as {}",
                     dev.to_string_lossy(),
                     config
                 );
@@ -96,7 +117,7 @@ impl App {
         let interval = (min_idle_time / 10).max(Duration::from_secs(1));
         if default_config.verbosity >= 2 {
             println!(
-                "<6>Default device configuration: {:?}. Refresh period: {}s",
+                "<6>Default device configuration: {}. Refresh period: {}s",
                 default_config,
                 interval.as_secs()
             );
@@ -304,6 +325,7 @@ fn parse_flags(flags: &RawOsStr, default: &DeviceConfig) -> Result<DeviceConfig>
     Ok(config)
 }
 
+#[inline(never)]
 fn parse_args() -> Result<App> {
     let mut args = env::args_os();
     let mut default_config = DeviceConfig::default();
@@ -373,7 +395,7 @@ fn main() {
         match parse_args().and_then(|mut app| app.run().context("main loop")) {
             Ok(()) => 0,
             Err(e) => {
-                eprintln!("<3>error: {:#}\n", e);
+                eprintln!("<3>error: {}\n", e);
                 1
             }
         },
