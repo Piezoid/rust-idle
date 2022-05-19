@@ -18,6 +18,7 @@ _pkgname="rust-idle"
 PKGNAME=${PKGNAME:-"$_pkgname"}
 
 install -Dm755 "target/$TARGET/release/rust-idle" "$DESTDIR/$PREFIX/bin/rust-idle"
+strip -s "$DESTDIR/$PREFIX/bin/rust-idle"
 
 install -Dm644 README.md "$DESTDIR/$PREFIX/share/doc/$PKGNAME/README.md"
 install -Dm644 LICENSE "$DESTDIR/$PREFIX/share/licenses/$PKGNAME/LICENSE"
