@@ -2,11 +2,12 @@
 
 *Give a break to your spinning rust.*
 
+`rust-idle` is a small linux daemon that spin down hard drives after a period of
+idle time.
+
 `rust-idle` is a reimplementation of *Christian Mueller*'s
 [`hd-idle`](http://hd-idle.sourceforge.net/) inspired by [another
 reimplementation in go](https://github.com/adelolmo/hd-idle).
-
-It is a small daemon that spin down hard drives after a period of idle time.
 
 ### Why?
 
@@ -14,51 +15,51 @@ It is a small daemon that spin down hard drives after a period of idle time.
 
 Why not? Rust is well suited for this task and I couldn't let go have it all. 😏
 
-The real reason is that this is meant as an exercise to see how well rust
-fares for writing simple small system daemons that are as lean as possible. A
+The real reason is that this is meant as an exercise to see how well rust fares
+for writing simple and small system daemons that are as lean as possible. A
 domain where C is king.
 
 ## **Warning**
 
-Frequently spinning down hard drives can quickly wear down the read head parking
+Frequently spinning down hard drives can quickly wear down the head parking
 mechanism. This can potentially offset any cost saving on energy or spindle
 wear.
 
 This software is provided *as-is*, without warranty of any kind. The authors
-decline all responsibility for damages resulting from its use.
+decline all responsibility for any damage resulting from its use.
 
 ## Features
 
 * Configurable idle time period and verbosity per hard drive, default settings
   for all other drives,
-* Possibility to sync the filesystem on the hard-drive before spinning it down
+* Possibility to sync the filesystems on the hard-drive before spinning it down
   and/or after it has waked up. This prevent spurious flushing of dirty pages
-  and swifter idling,
+  and enables swifter idling,
 * Systemd unit file included, log-level formatting for journald,
-* Small footprint: no allocations during normal operation, unless logging is
-  enabled or new drives are hot-plugged; Small binary when built with
+* Tiny runtime footprint: no allocations during normal operation, unless logging
+  is enabled or new drives are hot-plugged; Small binary when built with
   `build-std` (80kB on `x86_64`),
-* Like [the go implementation](https://github.com/adelolmo/hd-idle), it monitors
-  activity not on root device but on partitions. This prevents false-positives
-  when monitoring daemons like `smartd` or `udiskd` query the drive's status
-  registers,
+* Like [the go implementation](https://github.com/adelolmo/hd-idle), `rust-idle`
+  doesn't monitors activity on root device but instead monitors partitions. This
+  prevents false-positives when monitoring daemons like `smartd` or `udiskd`
+  query the drive's status registers,
 * ❌ Monitor and spin down disks connected over USB (planned, not yet
   implemented),
-* ❌ Has only been tested on `x86_64`,
+* ❌ Has only been tested on `x86_64` linux,
 * ❓ Any suggestion? Please open an [issue].
 
 ## Installation
 
-**dependencies**: cargo and rust. For a smaller binary size, rustup with a
-nightly toolchain is recommended.
+**dependencies**: `cargo` and `rustc`. For a smaller binary size, `rustup` with
+a nightly toolchain is recommended.
 
-On Arch Linux, the `rust-idler-git` package can be built from the AUR or with
-`arch/PKGBUILD` in this repos.
+On Arch Linux, the `rust-idler-git` package can be built from the AUR, or with
+`arch/PKGBUILD` found in this repos.
 
-It can be built the normal way (`cargo build --release`), but `build.sh` will
-try to use the `build-std` feature if available.
+Cargo can build this project the usual way (`cargo build --release`), however
+`build.sh` will try to use the `build-std` feature, if available.
 
-`install.sh` will install the binary, service file and documentation under
+`install.sh` installs the binary, service file, and documentation under
 `PREFIX=/usr/local/` by default. To test its behavior, it is possible to run it
 as a normal user, with the right environment. For example:
 
@@ -78,13 +79,13 @@ find "$DESTDIR" -type f
 
 ## Usage
 
-Once installed, the daemon can be enabled and started with
+Once installed, the daemon must be enabled and started with:
 ```
 # systemctl enable --now rust-idle
 ```
 
 With the default configuration under [`/etc/conf.d/rust-idle`](rust-idle.conf),
-`rust-idle` will wait for 10min of idle time before syncing and spinning down
+`rust-idle` waits for 10min of idle time before syncing and spinning down
 any SATA drive found on the system.
 
 Behavior can be specialized per device. Setting an idle time of 0 disable any
