@@ -1,36 +1,39 @@
 // Copyright (c) 2022 Maël Kerbiriou <m431.kerbiriou@gmail.com>. All rights
 // reserved. Use of this source is governed by MIT License that can be found in
 // the LICENSE file.
-
 use std::fmt;
 use std::io;
 use std::result;
 
 type CowStr = std::borrow::Cow<'static, str>;
 
-/// A anyhow error type on a diet
-pub struct Error {
+/// A anyhow error type on a diet.
+/// Sepcialized for io::Error and optional &'static str context.
+pub struct Error(Box<ErrorRepr>);
+
+pub type Result<T> = result::Result<T, Error>;
+
+struct ErrorRepr {
     chain: Vec<CowStr>,
     source: Option<io::Error>,
 }
 
-pub type Result<T> = result::Result<T, Error>;
-
 impl fmt::Display for Error {
     #[cold]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for ctx in self
+        let repr = &*self.0;
+        for ctx in repr
             .chain
             .iter()
-            .skip(usize::from(self.source.is_none()))
+            .skip(usize::from(repr.source.is_none()))
             .rev()
         {
             f.write_str(ctx)?;
             f.write_str(": ")?;
         }
-        if let Some(source) = &self.source {
+        if let Some(source) = &repr.source {
             fmt::Display::fmt(source, f)
-        } else if let Some(ctx) = self.chain.first() {
+        } else if let Some(ctx) = repr.chain.first() {
             f.write_str(ctx)
         } else {
             result::Result::Ok(())
@@ -45,18 +48,19 @@ impl fmt::Debug for Error {
 }
 
 impl std::error::Error for Error {
+    #[inline(always)]
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source.as_ref().map(|e| e as _)
+        self.0.source.as_ref().map(|e| e as _)
     }
 }
 
 impl From<CowStr> for Error {
     #[cold]
     fn from(msg: CowStr) -> Self {
-        Self {
+        Error(Box::new(ErrorRepr {
             chain: vec![msg],
             source: None,
-        }
+        }))
     }
 }
 
@@ -75,10 +79,10 @@ impl From<String> for Error {
 impl From<io::Error> for Error {
     #[cold]
     fn from(source: io::Error) -> Self {
-        Self {
-            chain: vec![],
+        Error(Box::new(ErrorRepr {
+            chain: Vec::new(),
             source: Some(source),
-        }
+        }))
     }
 }
 
@@ -102,19 +106,27 @@ impl<T, E> Context<T> for result::Result<T, E>
 where
     Error: From<E>,
 {
+    #[inline(always)]
     fn context<M>(self, msg: M) -> Result<T>
     where
         CowStr: From<M>,
     {
-        self.map_err(|e| add_context(e, msg))
+        self.map_err(
+            #[cold]
+            |e| add_context(e, msg),
+        )
     }
 
+    #[inline(always)]
     fn with_context<M, F>(self, f: F) -> Result<T>
     where
         F: FnOnce() -> M,
         CowStr: From<M>,
     {
-        self.map_err(|e| add_context(e, f()))
+        self.map_err(
+            #[cold]
+            |e| add_context(e, f()),
+        )
     }
 }
 
@@ -125,13 +137,21 @@ where
     CowStr: From<M>,
 {
     let mut this = Error::from(error);
-    this.chain.push(msg.into());
+    this.0.chain.push(msg.into());
     this
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_sizeofs() {
+        assert_eq!(
+            std::mem::size_of::<Result<usize>>(),
+            2 * std::mem::size_of::<usize>()
+        );
+    }
 
     fn assert_result_display(res: Result<()>, expected: &str) {
         assert_eq!(res.err().unwrap().to_string(), expected);
