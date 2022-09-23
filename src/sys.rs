@@ -22,7 +22,7 @@ pub fn make_inplace_cstr(str: &mut [u8]) -> Result<&CStr> {
             Ok(unsafe { &*(str as *const [u8] as *const CStr) })
         }
         _ => {
-            return Err(format!(
+            Err(format!(
                 "Expected null or whitespace at the end of '{}'",
                 OsStr::from_bytes(str).to_string_lossy()
             )

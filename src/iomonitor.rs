@@ -11,13 +11,35 @@ use crate::utils::{parse_integer, BulkReader};
 
 const DISKSTATS_PATH: &str = "/proc/diskstats";
 
-pub struct IOMonitor<T> {
-    file: BulkReader,
-    state: Vec<(OsString, usize, T)>,
+pub struct Device<T> {
+    name: OsString,
+    current_sectors: usize,
+    pub data: T,
 }
 
-fn get_entry_idx<T>(slice: &[(OsString, usize, T)], name: &OsStr, hint: usize) -> Option<usize> {
-    let pred = |&i: &usize| slice[i].0 == name;
+impl<T> Device<T> {
+    pub fn name(&self) -> &OsStr {
+        &self.name
+    }
+}
+
+impl<'a, T> From<&'a mut Device<T>> for (&'a OsStr, usize, &'a mut T) {
+    fn from(device: &'a mut Device<T>) -> Self {
+        (&device.name, device.current_sectors, &mut device.data)
+    }
+}
+
+/// Ressources for polling the # of touched sectors from /proc/diskstats
+///
+/// `data : T ` is attached user data.
+pub struct IOMonitor<T> {
+    file: BulkReader,
+    state: Vec<Device<T>>,
+}
+
+/// Linear search by device name
+fn get_entry_idx<T>(slice: &[Device<T>], name: &OsStr, hint: usize) -> Option<usize> {
+    let pred = |&i: &usize| slice[i].name == name;
     (hint..slice.len())
         .find(pred)
         .or_else(|| (0..hint).find(pred))
@@ -31,26 +53,29 @@ impl<T> IOMonitor<T> {
         })
     }
 
-    pub fn push(&mut self, dev: OsString, val: T) -> (&OsString, &mut T) {
-        let idx = get_entry_idx(&self.state, &dev, 0);
-        let slot = if let Some(idx) = idx {
+    pub fn push(&mut self, name: OsString, data: T) -> &mut Device<T> {
+        let idx = get_entry_idx(&self.state, &name, 0);
+        if let Some(idx) = idx {
             let slot = &mut self.state[idx];
-            slot.2 = val;
+            slot.data = data;
             slot
         } else {
-            self.state.push((dev, 0, val));
+            self.state.push(Device {
+                name,
+                current_sectors: 0,
+                data,
+            });
             self.state.last_mut().unwrap()
-        };
-        (&slot.0, &mut slot.2)
+        }
     }
 
     pub fn check_activity<'s, U, D>(&'s mut self, mut update_cb: U, create: D) -> Result<()>
     where
-        U: FnMut(&'s OsStr, usize, &'s mut T),
+        U: FnMut(&mut Device<T>),
         D: Fn(&'s OsStr) -> T,
     {
-        for (_, value, _) in &mut self.state {
-            *value = 0;
+        for device in &mut self.state {
+            device.current_sectors = 0;
         }
 
         let mut entry_idx = 0;
@@ -61,18 +86,23 @@ impl<T> IOMonitor<T> {
             {
                 if let Some(new_entry_idx) = get_entry_idx(&self.state, name, entry_idx) {
                     entry_idx = new_entry_idx;
-                    let entry_sectors = &mut self.state[entry_idx].1;
+                    let entry_sectors = &mut self.state[entry_idx].current_sectors;
                     *entry_sectors = entry_sectors.wrapping_add(sectors);
                 } else {
                     entry_idx = self.state.len().min(entry_idx + 1);
-                    self.state
-                        .insert(entry_idx, (name.into(), sectors, create(name)));
+                    let data = create(name);
+                    let device = Device {
+                        name: name.into(),
+                        current_sectors: sectors,
+                        data,
+                    };
+                    self.state.insert(entry_idx, device);
                 }
             }
         }
 
-        for (name, sectors, value) in &mut self.state {
-            update_cb(name, *sectors, value);
+        for device in &mut self.state {
+            update_cb(device);
         }
 
         Ok(())
