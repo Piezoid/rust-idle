@@ -2,7 +2,7 @@
 
 pkgname=rust-idle-git
 _pkgname=rust-idle
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Rust spin-down utility, a reimplementation of hd-idle"
 url="https://github.com/piezoid/rust-idle"

@@ -1,6 +1,6 @@
 [package]
 name = "rust-idle"
-version = "0.1.0"
+version = "0.1.1"
 description = "Rust spin-down utility, a reimplementation of hd-idle"
 authors = ["Maël kerbiriou <m431.kerbiriou@gmail.com>"]
 repository = "http://github.com/piezoid/rust-idle"
