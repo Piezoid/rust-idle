@@ -125,8 +125,8 @@ fn parse_line(line: &[u8]) -> Result<Option<(&OsStr, usize)>> {
         .rev()
         .take_while(|c| c.wrapping_sub(b'0') <= 9)
         .count();
-    if name_digits == 0 {
-        return Ok(None); // not a partition
+    if name_digits != 0 {
+        return Ok(None); // a partition
     }
 
     next_tok()?; // of reads completed (unsigned long)
@@ -154,7 +154,7 @@ fn parse_line(line: &[u8]) -> Result<Option<(&OsStr, usize)>> {
     sectors = sectors.wrapping_add(parse_integer(next_tok()?)?);
 
     Ok(Some((
-        OsStr::from_bytes(&name[..name.len() - name_digits]),
+        OsStr::from_bytes(name),
         sectors,
     )))
 }
