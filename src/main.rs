@@ -301,7 +301,7 @@ fn parse_flags(flags: &RawOsStr, default: &DeviceConfig) -> Result<DeviceConfig>
     let mut idle_time_sealed = false;
     let mut prefix = b'+';
     let mut prev_flag = b' ';
-    for &c in flags.as_raw_bytes() {
+    for &c in flags.as_encoded_bytes() {
         if prev_flag != b'-' && c != prev_flag {
             prefix = b'+'; // Reset modifier to the default (+), but not for '-vv' (equivalent to '-v-v')
         }
@@ -375,7 +375,7 @@ fn parse_args() -> Result<App> {
             default_config = config;
         } else {
             // "disk:[flags]" -> set the config of the device
-            let dev = sys::link_to_scsi_name(disk.to_os_str().as_ref())
+            let dev = sys::link_to_scsi_name(disk.as_os_str())
                 .with_context(|| format!("getting device for {}", disk.to_str_lossy()))?;
             device_configs.push((dev, config));
         }

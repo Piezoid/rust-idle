@@ -41,7 +41,7 @@ pub fn link_to_scsi_name(path: &OsStr) -> Result<OsString> {
     let mut stat_buf = nc::stat_t::default();
     unsafe { nc::stat(path, &mut stat_buf) }
         .with_context(|| format!("stat {}", path.to_string_lossy()))?;
-    if (stat_buf.st_mode as u32) & nc::S_IFMT != nc::S_IFBLK {
+    if stat_buf.st_mode & nc::S_IFMT != nc::S_IFBLK {
         return Err(format!("Not a block device: '{}'", path.to_string_lossy()).into());
     }
     let major = stat_buf.st_rdev >> 8;
@@ -138,11 +138,11 @@ pub fn syncfs(path: &CStr) -> Result<()> {
     }
 }
 
-const BLKFLSBUF: i32 = nc::IO('\u{12}', 97);
+const BLKFLSBUF: u32 = nc::IO(0x12, 97);
 
-pub fn sync_blockdev(dev: &OsStr) -> Result<()> {
+pub fn sync_blockdev(dev: &OsStr) -> Result<i32> {
     with_dev_fd(dev, |fd| {
-        unsafe { nc::ioctl(fd, BLKFLSBUF, 0) }
+        unsafe { nc::ioctl(fd, BLKFLSBUF, std::ptr::null()) }
             .with_context(|| format!("Could not sync block device '{}'", dev.to_string_lossy()))
     })
 }
@@ -180,7 +180,7 @@ pub fn spindown_disk(dev: &OsStr) -> Result<()> {
 
     const SCSI_STOP_CMD: &[u8] = b"\x1b\x00\x00\x00\x00\x00";
     const SG_DXFER_NONE: i32 = -1;
-    const SG_IO: i32 = 0x2285;
+    const SG_IO: u32 = 0x2285;
     const CHECK_CONDITION: u8 = 0x01;
 
     with_dev_fd(dev, |fd| {
@@ -209,7 +209,7 @@ pub fn spindown_disk(dev: &OsStr) -> Result<()> {
             duration: 0,
             info: 0,
         };
-        unsafe { nc::ioctl(fd, SG_IO, std::ptr::addr_of_mut!(hdr) as usize) }
+        unsafe { nc::ioctl(fd, SG_IO, std::ptr::addr_of_mut!(hdr) as *const c_void) }
             .context("Could not send SCSI command")?;
         if hdr.masked_status == 0 {
             Ok(())

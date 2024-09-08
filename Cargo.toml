@@ -1,3 +1,5 @@
+cargo-features = ["edition2024"]
+
 [package]
 name = "rust-idle"
 version = "0.1.1"
@@ -8,7 +10,7 @@ license = "MIT/Apache-2.0"
 readme = "README.md"
 keywords = ["hard-disk", "hd-idle", "cli", "daemon"]
 categories = ["command-line-utilities", "hardware-support"]
-edition = "2021"
+edition = "2024"
 
 [profile.release]
 opt-level = "z"     # Optimize for size.
@@ -20,9 +22,9 @@ debug = false
 debug-assertions = false
 
 [dependencies]
-nc = "0.8"
+nc = "0.9"
 
 [dependencies.os_str_bytes]
-version = "6.0"
+version = "7.0"
 features = ["raw_os_str"]
 default-features = false
