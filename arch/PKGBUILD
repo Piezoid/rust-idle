@@ -36,10 +36,10 @@ prepare() {
 build() {
   cd "$_pkgname"
   CARGO_FLAGS="$(< .cargo-flags)"
-  cargo $CARGO_FLAGS build --target="$_rtarget" --release --frozen
+  cargo $CARGO_FLAGS build --artifact-dir=. -Z unstable-options --target="$_rtarget" --release --frozen
 }
 
 package() {
   cd "$_pkgname"
-  DESTDIR="$pkgdir" PREFIX="/usr" TARGET="$_rtarget" PKGNAME="$pkgname" ./install.sh
+  DESTDIR="$pkgdir" PREFIX="/usr" PKGNAME="$pkgname" ./install.sh
 }
